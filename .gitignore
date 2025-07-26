@@ -5,6 +5,3 @@
 .vscode/
 .idea/
 __pycache__/
-
-# 取消敏感信息的提交
-backend/credentials.json
