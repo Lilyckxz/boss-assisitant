@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>内容推送中转站</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #f4f7f6; margin: 0; padding: 2rem; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { color: #333; text-align: center; }
+        .form-group { margin-bottom: 1.5rem; }
+        label { display: block; margin-bottom: 0.5rem; color: #555; font-weight: bold; }
+        input, textarea, select { width: 100%; padding: 0.75rem; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 1rem; }
+        textarea { resize: vertical; min-height: 150px; }
+        button { display: block; width: 100%; padding: 1rem; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 1rem; font-weight: bold; cursor: pointer; transition: background-color 0.2s; }
+        button:hover { background-color: #0056b3; }
+        #response { margin-top: 1.5rem; padding: 1rem; border-radius: 4px; background-color: #e9ecef; color: #495057; display: none; white-space: pre-wrap; word-wrap: break-word; }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .response-box { margin-top: 1.5rem; padding: 1rem; border-radius: 4px; display: none; }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
+        .modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 700px; border-radius: 8px; position: relative; }
+        .close-btn { color: #aaa; position: absolute; top: 10px; right: 20px; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .close-btn:hover, .close-btn:focus { color: black; }
+        #modal-body table { width: 100%; border-collapse: collapse; }
+        #modal-body th, #modal-body td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        #modal-body th { background-color: #f2f2f2; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>内容推送中转站</h1>
+    <form id="push-form">
+        <div class="form-group">
+            <label for="title">标题</label>
+            <input type="text" id="title" name="title" required>
+        </div>
+        <div class="form-group">
+            <label for="category">分类</label>
+            <select id="category" name="category">
+                <option value="health">养生区</option>
+                <option value="industry_report">产业分析报告</option>
+                <option value="finance_analysis">财经分析</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="content">正文</label>
+            <textarea id="content" name="content" required></textarea>
+        </div>
+        <div style="font-size:13px;color:#888;margin-bottom:8px;">
+            支持Markdown：# 一级标题，## 二级标题，- 无序列表，1. 有序列表，<br>
+            <code>![图片alt](图片链接)</code> 插入图片
+            <button type="button" id="preview-btn" style="margin-left:1em;">预览</button>
+        </div>
+        <div id="md-preview-modal" class="modal">
+          <div class="modal-content">
+            <span class="close-btn">&times;</span>
+            <h3>正文预览</h3>
+            <div id="md-preview-body" style="max-height:400px;overflow:auto;"></div>
+          </div>
+        </div>
+        <div class="form-group">
+            <label for="summary">摘要 (选填)</label>
+            <input type="text" id="summary" name="summary">
+        </div>
+        <div class="form-group">
+            <label for="cover-upload">上传封面图 (优先使用)</label>
+            <input type="file" id="cover-upload" name="cover_file" accept="image/*">
+        </div>
+        <div class="form-group">
+            <label for="cover-url">或输入封面图链接</label>
+            <input type="url" id="cover-url" name="cover_url">
+        </div>
+        <button type="submit">推送</button>
+    </form>
+    <div id="response" class="response-box"></div>
+</div>
+
+<hr style="margin: 3rem 0;">
+
+<div class="container" id="permissions-container">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2>权限管理</h2>
+        <button id="show-all-permissions-btn">查看所有权限</button>
+    </div>
+    <div id="permissions-form">
+        <!-- 权限列表将由JS动态生成 -->
+    </div>
+    <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+        <select id="new-user-select" style="flex-grow: 1;"></select>
+        <button id="add-user-btn" style="flex-shrink: 0; width: auto;">添加用户</button>
+    </div>
+    <button id="save-permissions-btn" style="margin-top: 1.5rem;">保存权限</button>
+    <div id="permissions-response" class="response-box"></div>
+</div>
+
+<!-- Modal for displaying all permissions -->
+<div id="permissions-modal" class="modal">
+    <div class="modal-content">
+        <span class="close-btn">&times;</span>
+        <h3>所有用户权限</h3>
+        <div id="modal-body"></div>
+    </div>
+</div>
+
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+    const state = {
+        permissions: [],
+        allCategories: [],
+        allUsers: [],
+    };
+
+    // --- DOM Elements ---
+    const permissionsForm = document.getElementById('permissions-form');
+    const newUserSelect = document.getElementById('new-user-select');
+    const permissionsResponse = document.getElementById('permissions-response');
+    const modal = document.getElementById('permissions-modal');
+    const modalBody = document.getElementById('modal-body');
+    const closeModalBtn = document.querySelector('.close-btn');
+
+    // --- Render Functions ---
+    function renderPermissionsTable() {
+        permissionsForm.innerHTML = '';
+        if (state.permissions.length === 0) {
+            permissionsForm.innerHTML = '<p>暂无用户权限配置，请从下方选择用户添加。</p>';
+            return;
+        }
+
+        state.permissions.forEach(userPerm => {
+            const userDiv = document.createElement('div');
+            userDiv.className = 'form-group user-permission-row';
+            userDiv.style = 'border: 1px solid #eee; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;';
+            
+            const username = userPerm.username ? `(${userPerm.username})` : '(未知用户)';
+            const checkboxesHTML = state.allCategories.map(cat => `
+                <label style="display: inline-flex; align-items: center; margin-right: 1rem; font-weight: normal;">
+                    <input type="checkbox" value="${cat}" ${userPerm.categories.includes(cat) ? 'checked' : ''} onchange="updatePermission('${userPerm.id}', '${cat}', this.checked)">
+                    <span style="margin-left: 0.5rem;">${cat}</span>
+                </label>
+            `).join('');
+
+            userDiv.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <strong style="font-size: 1.2rem;">用户ID: ${userPerm.id} ${username}</strong>
+                    <button class="delete-user-btn" onclick="deleteUser('${userPerm.id}')" style="background-color: #dc3545; padding: 0.5rem 1rem; width: auto;">删除</button>
+                </div>
+                <div>${checkboxesHTML}</div>
+            `;
+            permissionsForm.appendChild(userDiv);
+        });
+    }
+
+    function renderNewUserDropdown() {
+        const configuredUserIds = new Set(state.permissions.map(p => p.id));
+        const availableUsers = state.allUsers.filter(u => !configuredUserIds.has(String(u.id)));
+        
+        newUserSelect.innerHTML = '<option value="">-- 选择一个用户来添加 --</option>';
+        availableUsers.forEach(user => {
+            const option = document.createElement('option');
+            option.value = user.id;
+            option.textContent = `${user.username} (ID: ${user.id})`;
+            newUserSelect.appendChild(option);
+        });
+    }
+
+    function renderModalTable() {
+        let tableHTML = `
+            <table>
+                <tr>
+                    <th>用户ID</th>
+                    <th>用户名</th>
+                    <th>订阅权限</th>
+                </tr>
+        `;
+        state.permissions.forEach(p => {
+            tableHTML += `
+                <tr>
+                    <td>${p.id}</td>
+                    <td>${p.username || 'N/A'}</td>
+                    <td>${p.categories.join(', ') || '无'}</td>
+                </tr>
+            `;
+        });
+        tableHTML += '</table>';
+        modalBody.innerHTML = tableHTML;
+    }
+
+
+    // --- State Update Functions ---
+    function updatePermission(userId, category, isChecked) {
+        const userPerm = state.permissions.find(p => p.id === userId);
+        if (!userPerm) return;
+
+        const userCategories = userPerm.categories;
+        const hasCategory = userCategories.includes(category);
+
+        if (isChecked && !hasCategory) {
+            userCategories.push(category);
+        } else if (!isChecked && hasCategory) {
+            userPerm.categories = userCategories.filter(c => c !== category);
+        }
+    }
+
+    // --- Event Listeners ---
+    document.getElementById('add-user-btn').addEventListener('click', () => {
+        const selectedUserId = newUserSelect.value;
+        if (!selectedUserId) return;
+
+        const user = state.allUsers.find(u => String(u.id) === selectedUserId);
+        if (user) {
+            state.permissions.push({
+                id: String(user.id),
+                username: user.username,
+                categories: []
+            });
+            renderPermissionsTable();
+            renderNewUserDropdown();
+        }
+    });
+
+    function deleteUser(userId) {
+        if (confirm(`确定要删除用户 ${userId} 的权限配置吗？`)) {
+            state.permissions = state.permissions.filter(p => p.id !== userId);
+            renderPermissionsTable();
+            renderNewUserDropdown();
+        }
+    }
+    
+    document.getElementById('save-permissions-btn').addEventListener('click', async () => {
+        // 将前端的 enriched state 转换回后端需要的 PermissionsUpdateRequest 格式
+        const permissionsToSave = {
+            users: {},
+            categories: state.allCategories
+        };
+        state.permissions.forEach(p => {
+            permissionsToSave.users[p.id] = { categories: p.categories };
+        });
+
+        showResponse(permissionsResponse, '正在保存...', 'info');
+        try {
+            const response = await fetch('/api/permissions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(permissionsToSave)
+            });
+            const result = await response.json();
+            if (response.ok) {
+                showResponse(permissionsResponse, '权限保存成功！', 'success');
+            } else {
+                showResponse(permissionsResponse, `保存失败: ${result.detail}`, 'error');
+            }
+        } catch (error) {
+            showResponse(permissionsResponse, '请求失败: ' + error, 'error');
+        }
+    });
+    
+    document.getElementById('show-all-permissions-btn').addEventListener('click', () => {
+        renderModalTable();
+        modal.style.display = 'block';
+    });
+
+    closeModalBtn.onclick = () => modal.style.display = 'none';
+    window.onclick = (event) => {
+        if (event.target == modal) {
+            modal.style.display = 'none';
+        }
+    };
+
+    // Markdown预览
+    document.getElementById('preview-btn').onclick = function() {
+        const content = document.getElementById('content').value;
+        document.getElementById('md-preview-body').innerHTML = marked.parse(content);
+        document.getElementById('md-preview-modal').style.display = 'block';
+    };
+    document.querySelectorAll('.close-btn').forEach(btn => {
+        btn.onclick = () => document.getElementById('md-preview-modal').style.display = 'none';
+    });
+    window.onclick = (event) => {
+        if (event.target == document.getElementById('md-preview-modal')) {
+            document.getElementById('md-preview-modal').style.display = 'none';
+        }
+    };
+
+    // --- Helper Functions ---
+    function showResponse(element, message, type) {
+        element.textContent = message;
+        element.className = `response-box ${type}`;
+        element.style.display = 'block';
+    }
+
+    // --- Initial Load ---
+    async function initializePage() {
+        try {
+            const response = await fetch('/api/enriched_permissions');
+            const data = await response.json();
+            
+            state.permissions = data.permissions;
+            state.allCategories = data.all_categories;
+            state.allUsers = data.all_users;
+            
+            const categorySelect = document.getElementById('category');
+            categorySelect.innerHTML = state.allCategories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
+
+            renderPermissionsTable();
+            renderNewUserDropdown();
+        } catch (error) {
+            console.error('获取权限失败:', error);
+            permissionsContainer.innerHTML = '<h2>无法加载权限管理模块</h2><p>请检查中转站和主后端是否都已正常启动。</p>';
+        }
+    }
+    
+    // 推送表单的逻辑
+    document.getElementById('push-form').addEventListener('submit', async function(event) {
+        event.preventDefault();
+
+        const form = event.target;
+        // 使用 FormData 来处理文件上传
+        const formData = new FormData(form);
+
+        const responseDiv = document.getElementById('response');
+        showResponse(responseDiv, '正在推送...', 'info');
+
+        try {
+            const response = await fetch('/relay_push', {
+                method: 'POST',
+                body: formData // 直接发送 FormData
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+                showResponse(responseDiv, '推送成功: \n' + JSON.stringify(result, null, 2), 'success');
+                form.reset();
+            } else {
+                showResponse(responseDiv, '推送失败: \n' + JSON.stringify(result, null, 2), 'error');
+            }
+        } catch (error) {
+            showResponse(responseDiv, '请求失败: \n' + error.toString(), 'error');
+        }
+    });
+
+    window.addEventListener('DOMContentLoaded', initializePage);
+
+</script>
+</body>
+</html> 

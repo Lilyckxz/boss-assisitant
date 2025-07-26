@@ -1,0 +1,10 @@
+# 忽略虚拟环境文件夹
+.venv/
+
+# 忽略常见 IDE 设置
+.vscode/
+.idea/
+__pycache__/
+
+# 取消敏感信息的提交
+backend/credentials.json
